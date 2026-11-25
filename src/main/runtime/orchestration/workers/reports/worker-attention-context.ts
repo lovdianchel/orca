@@ -39,7 +39,8 @@ export function projectWorkerAttentionContext(args: {
     outcome: resolveFleetWorkerOutcome({
       attemptOutcome: args.facts.outcome,
       workerState: args.facts.workerState,
-      dispatchStatus: args.facts.dispatchStatus
+      dispatchStatus: args.facts.dispatchStatus,
+      stopConfirmed: args.facts.stopConfirmed
     }),
     pendingInput: args.facts.pendingInput,
     pendingGuidance: args.facts.pendingGuidance,

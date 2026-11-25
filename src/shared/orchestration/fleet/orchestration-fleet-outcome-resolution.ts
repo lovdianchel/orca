@@ -7,7 +7,7 @@ export type FleetAttemptOutcome =
   | 'outcome_unknown'
   | 'finished_unverified'
 
-/** `stopped`: someone asked for the stop, so it is no failure even though the stop fails the Dispatch. */
+/** `stopped`: a stop someone asked for proved its worker ended, so it is no failure even though the stop fails the Dispatch. */
 export type FleetWorkerOutcome = FleetAttemptOutcome | 'stopped'
 
 export type FleetSettlementSubject = {
@@ -39,11 +39,13 @@ export function resolveFleetWorkerOutcome(args: {
   attemptOutcome?: FleetWorkerOutcome
   workerState?: string | null
   dispatchStatus?: string | null
+  /** The confirmed owner-stop row the dock also reads; without it a stop is unexplained. */
+  stopConfirmed?: boolean
 }): FleetWorkerOutcome {
   const { attemptOutcome, workerState, dispatchStatus } = args
-  // Only a worker stop settles `stopped`; it fails a still-active Dispatch with `last_failure: 'stopped'`, rows written before this included.
   if (workerState === 'stopped' && attemptOutcome !== 'succeeded' && attemptOutcome !== 'failed') {
-    return 'stopped'
+    // A `stopped` attempt outcome is this resolution already made upstream, as the fleet projection re-resolves.
+    return args.stopConfirmed || attemptOutcome === 'stopped' ? 'stopped' : 'failed'
   }
   if (attemptOutcome && attemptOutcome !== 'outcome_unknown') {
     return attemptOutcome

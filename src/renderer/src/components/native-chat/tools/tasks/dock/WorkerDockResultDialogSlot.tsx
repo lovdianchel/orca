@@ -2,6 +2,9 @@ import { lazy, Suspense, useLayoutEffect, useRef } from 'react'
 import type { WorkerDockResultDialogState } from './use-worker-dock-owner-actions'
 import type { WorkerDockRowView } from './WorkerDockRow'
 import { returnWorkerDockFocus, workerDockOpenerPane } from './worker-dock-focus-return'
+import { useAppStore } from '@/store/index'
+import { workspaceCatalogConfirmsAbsence } from '@/store/workspaces/catalog/workspace-catalog-absence'
+import type { ExecutionHostId } from '../../../../../../../shared/execution-host/execution-host'
 
 const WorkerDockResultDialog = lazy(() =>
   import('./WorkerDockResultDialog').then((module) => ({
@@ -13,12 +16,15 @@ const WorkerDockResultDialog = lazy(() =>
  *  that row is gone, to the pill in the same chat pane. */
 export function WorkerDockResultDialogSlot({
   dialog,
+  hostId,
   ownerActionsAvailable,
   onClose,
   onOpen,
   onRestore
 }: {
   dialog: WorkerDockResultDialogState | null
+  /** The host the dock reads, whose workspace catalog says whether the worker's workspace is gone. */
+  hostId: ExecutionHostId
   ownerActionsAvailable: boolean
   onClose: () => void
   onOpen: (row: WorkerDockRowView) => void
@@ -28,6 +34,10 @@ export function WorkerDockResultDialogSlot({
   // the time it hands focus back.
   const saved = useRef<{ opener: HTMLElement; pane: Element | null } | null>(null)
   const opener = dialog?.opener
+  const workspaceId = dialog?.result?.workspaceId
+  const workspaceRemoved = useAppStore((state) =>
+    Boolean(workspaceId && workspaceCatalogConfirmsAbsence(state, workspaceId, hostId))
+  )
   useLayoutEffect(() => {
     if (opener) {
       saved.current = { opener, pane: workerDockOpenerPane(opener) }
@@ -42,6 +52,7 @@ export function WorkerDockResultDialogSlot({
         result={dialog.result}
         row={dialog.row}
         error={dialog.error}
+        workspaceRemoved={workspaceRemoved}
         onClose={onClose}
         onOpen={() => onOpen(dialog.row)}
         onRestore={onRestore}

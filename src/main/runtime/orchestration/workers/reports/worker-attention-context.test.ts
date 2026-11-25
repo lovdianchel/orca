@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { OrchestrationDb } from '../../db/orchestration-db'
 import { buildWorkerAttentionContext } from './worker-attention-context'
+import { readWorkerDockResult } from '../../dock/worker-dock-read'
+import { recordWorkerStop } from '../../dock/worker-dock-owner-stop'
+import { projectWorkerFleet } from '../../../rpc/methods/orchestration/worker/fleet/worker-list-projection'
+
+const SESSION = '11111111-1111-4111-8111-111111111111'
+const NOW = Date.parse('2026-11-25T12:00:00Z')
 
 let db: OrchestrationDb
 beforeEach(() => {
@@ -18,7 +24,37 @@ function startedWorker(): string {
     taskId: task.id,
     startOptions: { agent: 'codex' }
   })
+  db.db
+    .prepare('UPDATE dispatch_contexts SET creator_orca_session_id = ? WHERE id = ?')
+    .run(SESSION, dispatch.id)
   return dispatch.id
+}
+
+function stoppedWorker(): string {
+  const dispatchId = startedWorker()
+  db.db
+    .prepare("UPDATE worker_dispatches SET state = 'ready' WHERE dispatch_id = ?")
+    .run(dispatchId)
+  db.beginWorkerStop(dispatchId, 'epoch_1')
+  db.settleWorkerStop(dispatchId)
+  return dispatchId
+}
+
+/** What the dock's card and worker-show each say about one worker. */
+function readings(dispatchId: string) {
+  const rows = db.listWorkerTerminalResources({ dispatchIds: [dispatchId], limit: 1 })
+  const shown = projectWorkerFleet({
+    rows,
+    attentionFacts: db.getWorkerAttentionFactsForDispatches([dispatchId], NOW),
+    statuses: [],
+    limit: 1,
+    now: NOW
+  }).workers[0]
+  return {
+    dock: readWorkerDockResult(db, `orca_session_id:${SESSION}`, dispatchId)?.outcome,
+    show: shown.outcome,
+    attention: attention(dispatchId)
+  }
 }
 
 function attention(dispatchId: string) {
@@ -32,20 +68,31 @@ function attention(dispatchId: string) {
 }
 
 describe('worker attention outcome', () => {
-  it('reads a stop as stopped, though the stop still stores the Dispatch as failed', () => {
-    const dispatchId = startedWorker()
-    db.db
-      .prepare("UPDATE worker_dispatches SET state = 'ready' WHERE dispatch_id = ?")
-      .run(dispatchId)
-    db.beginWorkerStop(dispatchId, 'epoch_1')
-    db.settleWorkerStop(dispatchId)
+  it('reads a coordinator worker-stop as stopped in the dock and worker-show alike', () => {
+    const dispatchId = stoppedWorker()
+    recordWorkerStop(db, dispatchId, {
+      dispatchId,
+      state: 'stopped',
+      alreadySettled: false,
+      processAction: 'closed_agent_terminal'
+    })
 
-    // The row shape every earlier stop already wrote, so old rows read the same way.
+    // The stop still fails the Dispatch; only the owner-stop row says someone asked for it.
     expect(db.getDispatchContextById(dispatchId)).toMatchObject({
       status: 'failed',
       last_failure: 'stopped'
     })
-    expect(attention(dispatchId)).not.toContain('failure')
+    const read = readings(dispatchId)
+    expect(read).toMatchObject({ dock: 'stopped', show: 'stopped' })
+    expect(read.attention).not.toContain('failure')
+  })
+
+  it('reads an unexplained stop as unexpected in the dock and a failure in worker-show alike', () => {
+    const dispatchId = stoppedWorker()
+
+    const read = readings(dispatchId)
+    expect(read).toMatchObject({ dock: 'unexpected', show: 'failed' })
+    expect(read.attention).toContain('failure')
   })
 
   it('still reads a failed start as a failure', () => {

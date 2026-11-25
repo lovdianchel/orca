@@ -34,12 +34,14 @@ export function projectWorkerFleet(args: {
   observeSession?: Parameters<typeof projectOrchestrationFleet>[0]['observeSession']
 }) {
   const workers: FleetDurableWorker[] = args.rows.map((row) => {
+    const facts = args.attentionFacts.get(row.dispatchId)
     return {
       ...row,
       outcome: resolveFleetWorkerOutcome({
-        attemptOutcome: args.attentionFacts.get(row.dispatchId)?.outcome ?? 'outcome_unknown',
+        attemptOutcome: facts?.outcome ?? 'outcome_unknown',
         workerState: row.workerState,
-        dispatchStatus: row.dispatchStatus
+        dispatchStatus: row.dispatchStatus,
+        stopConfirmed: facts?.stopConfirmed
       }),
       resource: row.resource
         ? {

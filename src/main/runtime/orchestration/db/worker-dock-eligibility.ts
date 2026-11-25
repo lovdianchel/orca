@@ -1,10 +1,15 @@
 import { WORKER_DOCK_FAILURE_LIMIT } from '../../../../shared/orchestration/dock/worker-dock'
 
+/** A requested stop that proved its worker ended: the one fact the dock and worker-show/list read as intent. */
+export const confirmedOwnerStopSql = (
+  facts: string
+) => `EXISTS (SELECT 1 FROM worker_dock_owner_stops s
+    WHERE s.dispatch_id = ${facts}.dispatch_id AND s.confirmed = 1 AND s.settlement = ${facts}.settlement)`
+
 export const workerDockEligibleSql = `f.source = ? AND (f.state <> 'succeeded' OR f.report_id IS NULL)
   AND NOT EXISTS (SELECT 1 FROM worker_dock_acknowledgments a
     WHERE a.source = f.source AND a.dispatch_id = f.dispatch_id AND a.settlement = f.settlement)
-  AND NOT EXISTS (SELECT 1 FROM worker_dock_owner_stops s
-    WHERE s.dispatch_id = f.dispatch_id AND s.confirmed = 1 AND s.settlement = f.settlement)`
+  AND NOT ${confirmedOwnerStopSql('f')}`
 
 // Indexed ranges keep settled history off the roster path.
 export const workerDockCurrentRowsSql = `SELECT * FROM worker_dock_facts INDEXED BY worker_dock_source_state_time
@@ -18,8 +23,7 @@ export const workerDockCurrentRowsSql = `SELECT * FROM worker_dock_facts INDEXED
     WHERE f.source = ? AND f.state IN ('failed', 'stopped') AND f.changed_at > ?
     AND NOT EXISTS (SELECT 1 FROM worker_dock_acknowledgments a
       WHERE a.source = f.source AND a.dispatch_id = f.dispatch_id AND a.settlement = f.settlement)
-    AND NOT EXISTS (SELECT 1 FROM worker_dock_owner_stops s
-      WHERE s.dispatch_id = f.dispatch_id AND s.confirmed = 1 AND s.settlement = f.settlement)
+    AND NOT ${confirmedOwnerStopSql('f')}
     AND NOT EXISTS (SELECT 1 FROM dispatch_contexts d JOIN dispatch_contexts later
       ON later.task_id = d.task_id AND later.rowid > d.rowid WHERE d.id = f.dispatch_id)
     ORDER BY f.changed_at DESC, f.dispatch_id COLLATE BINARY LIMIT ${WORKER_DOCK_FAILURE_LIMIT}

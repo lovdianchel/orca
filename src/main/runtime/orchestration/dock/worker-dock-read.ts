@@ -21,7 +21,11 @@ import {
   readProviderFailureIdentities,
   readProviderFailureRows
 } from './worker-dock-provider-failures'
-import { workerDockCurrentRowsSql, workerDockEligibleSql } from '../db/worker-dock-eligibility'
+import {
+  confirmedOwnerStopSql,
+  workerDockCurrentRowsSql,
+  workerDockEligibleSql
+} from '../db/worker-dock-eligibility'
 import { readWorkerDockActivity, workerDockActivityRevision } from './worker-dock-activity'
 import { workerDockStoppingIds } from './worker-dock-owner-stop'
 
@@ -235,14 +239,15 @@ export function readWorkerDockResult(
   const row = db.db
     .prepare(`SELECT f.dispatch_id, f.report_id, f.settlement, f.changed_at, f.state, w.last_error, d.last_failure,
     NOT EXISTS(SELECT 1 FROM federated_dispatches remote WHERE remote.dispatch_id = f.dispatch_id) AS owner_actions_available,
-    COALESCE(t.task_title, t.spec) AS title, t.display_name, w.start_options, m.body, m.payload, accepted.payload AS accepted_payload, s.receipt,
+    COALESCE(t.task_title, t.spec) AS title, t.display_name,
+    COALESCE(w.worktree_id, (SELECT r.worktree_id FROM worker_terminal_resources r WHERE r.owner_dispatch_id = f.dispatch_id LIMIT 1)) AS workspace_id, w.start_options, m.body, m.payload, accepted.payload AS accepted_payload,
+    ${confirmedOwnerStopSql('f')} AS stopped_by_owner,
     EXISTS(SELECT 1 FROM worker_dock_acknowledgments a WHERE a.source = f.source
       AND a.dispatch_id = f.dispatch_id AND a.settlement = f.settlement) AS acknowledged
     FROM worker_dock_facts f JOIN dispatch_contexts d ON d.id = f.dispatch_id
     JOIN tasks t ON t.id = d.task_id JOIN worker_dispatches w ON w.dispatch_id = f.dispatch_id
     LEFT JOIN messages m ON m.id = f.report_id
     LEFT JOIN attempt_observation_facts accepted ON accepted.id = 'worker_report:' || f.report_id
-    LEFT JOIN worker_dock_owner_stops s ON s.dispatch_id = f.dispatch_id AND s.confirmed = 1 AND s.settlement = f.settlement
     WHERE f.source = ? AND f.dispatch_id = ?`)
     .get(workerDockSession(party), dispatchId)
   if (!row) {
@@ -258,10 +263,11 @@ export function readWorkerDockResult(
         ? row.last_failure
         : null
   const failure = row.state === 'failed' || row.state === 'stopped' || row.state === 'abandoned'
-  if (typeof row.body !== 'string' && !row.receipt && !(failure && failureReason)) {
+  const stoppedByOwner = row.stopped_by_owner === 1
+  if (typeof row.body !== 'string' && !stoppedByOwner && !(failure && failureReason)) {
     return null
   }
-  const outcome = row.receipt
+  const outcome = stoppedByOwner
     ? 'stopped'
     : (reportOutcome(row.accepted_payload) ??
       reportOutcome(row.payload) ??
@@ -272,7 +278,7 @@ export function readWorkerDockResult(
   return WorkerDockResult.parse({
     id:
       row.report_id ??
-      (row.receipt ? `owner_stop:${dispatchId}` : `settlement:${String(row.settlement)}`),
+      (stoppedByOwner ? `owner_stop:${dispatchId}` : `settlement:${String(row.settlement)}`),
     dispatchId,
     name:
       row.display_name ??
@@ -281,12 +287,13 @@ export function readWorkerDockResult(
       'Worker',
     title: row.title,
     outcome,
-    body: row.body ?? (row.receipt ? 'Stopped by you.' : failureReason),
+    body: row.body ?? (stoppedByOwner ? 'Stopped by you.' : failureReason),
     report: typeof row.body === 'string',
     at: epoch(row.changed_at),
     settlement: row.settlement ?? `worker_report:${String(row.report_id)}`,
     acknowledged: row.acknowledged === 1,
-    ownerActionsAvailable: row.owner_actions_available === 1
+    ownerActionsAvailable: row.owner_actions_available === 1,
+    ...(typeof row.workspace_id === 'string' ? { workspaceId: row.workspace_id } : {})
   })
 }
 function reportOutcome(payload: unknown): 'succeeded' | 'failed' | null {

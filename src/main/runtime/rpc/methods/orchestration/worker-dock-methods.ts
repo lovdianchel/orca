@@ -21,10 +21,7 @@ import {
 } from '../../../orchestration/dock/worker-dock-activity'
 import { subscribeWorkerDock } from '../../../orchestration/dock/worker-dock-stream'
 import { stopWorkerAndHelpers } from './worker/worker-stop'
-import {
-  holdWorkerDockStopping,
-  isConfirmedWorkerStop
-} from '../../../orchestration/dock/worker-dock-owner-stop'
+import { holdWorkerDockStopping } from '../../../orchestration/dock/worker-dock-owner-stop'
 import { OrchestrationError } from '../../../orchestration/orchestration-error'
 import { isPersonCaller } from './access/worker-approval-access'
 import type { RpcContext } from '../../core'
@@ -126,10 +123,10 @@ export const ORCHESTRATION_WORKER_DOCK_METHODS = [
       }
       return holdWorkerDockStopping(db, dispatch, async () => {
         const receipt = await stopWorkerAndHelpers(runtime, dispatch, orchestrationMutation)
+        // The stop records the confirmed row itself; this one only replays the receipt to a retried request.
         db.db
-          .prepare(`UPDATE worker_dock_owner_stops SET receipt = ?, confirmed = ?, settlement =
-          (SELECT settlement FROM worker_dock_facts WHERE dispatch_id = ?) WHERE request_id = ?`)
-          .run(JSON.stringify(receipt), Number(isConfirmedWorkerStop(receipt)), dispatch, requestId)
+          .prepare('UPDATE worker_dock_owner_stops SET receipt = ? WHERE request_id = ?')
+          .run(JSON.stringify(receipt), requestId)
         return receipt
       })
     }

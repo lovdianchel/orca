@@ -27,16 +27,15 @@ export const ORCHESTRATION_WORKER_STOP_METHODS = [
     params: WorkerDispatchParams,
     handler: (params, { runtime, orchestrationMutation }) => {
       const db = runtime.getOrchestrationDb()
-      return holdWorkerDockStopping(db, params.dispatch, async () => {
-        const receipt = await stopWorkerAndHelpers(runtime, params.dispatch, orchestrationMutation)
-        recordWorkerStop(db, params.dispatch, receipt)
-        return receipt
-      })
+      return holdWorkerDockStopping(db, params.dispatch, () =>
+        stopWorkerAndHelpers(runtime, params.dispatch, orchestrationMutation)
+      )
     }
   })
 ]
 
-/** Stopping a worker stops every helper under it; a kept-open helper is reported, not refused. */
+/** Stopping a worker stops every helper under it; a kept-open helper is reported, not refused.
+ *  Every caller asked for the stop, so a confirmed one records the owner-stop row here. */
 export function stopWorkerAndHelpers(
   runtime: OrcaRuntimeService,
   dispatchId: string,
@@ -47,7 +46,9 @@ export function stopWorkerAndHelpers(
     if (stopped.state === 'stopped' && !stopped.alreadySettled) {
       await closeStoppedWorkerTerminals(runtime, runtime.getOrchestrationDb(), dispatchId)
     }
-    return withStoppedHelpers(runtime, dispatchId, mutation, stopped)
+    const receipt = await withStoppedHelpers(runtime, dispatchId, mutation, stopped)
+    recordWorkerStop(runtime.getOrchestrationDb(), dispatchId, receipt)
+    return receipt
   })
 }
 

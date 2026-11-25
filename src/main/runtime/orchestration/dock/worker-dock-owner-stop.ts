@@ -67,7 +67,7 @@ export async function holdWorkerDockStopping<T>(
   }
 }
 
-/** A confirmed worker-stop was asked for, whoever asked, so it leaves the dock as the dock's Stop does. */
+/** Every requested stop writes this row once it is confirmed, whoever asked; the dock and worker-show/list read it as intent. */
 export function recordWorkerStop(
   db: OrchestrationDb,
   dispatchId: string,
@@ -78,7 +78,7 @@ export function recordWorkerStop(
   }
   db.db
     .prepare(`INSERT OR IGNORE INTO worker_dock_owner_stops(request_id, source, dispatch_id, receipt, confirmed, settlement)
-    SELECT 'worker_stop:' || dispatch_id || ':' || settlement, source, dispatch_id, ?, 1, settlement
+    SELECT 'worker_stop:' || dispatch_id || ':' || settlement, COALESCE(source, ''), dispatch_id, ?, 1, settlement
     FROM worker_dock_facts WHERE dispatch_id = ? AND state = 'stopped'`)
     .run(JSON.stringify(receipt), dispatchId)
 }

@@ -22857,6 +22857,7 @@
         "dismiss": "Dismiss",
         "openWorker": "Open worker",
         "remoteOwner": "Stop or clear this from the computer it runs on",
+        "workspaceRemoved": "This worker's workspace was removed",
         "restore": "Show in dock again",
         "alreadyStopped": "Already stopped",
         "cantStop": "Can't stop now",

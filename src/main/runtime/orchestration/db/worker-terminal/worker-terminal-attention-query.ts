@@ -9,6 +9,7 @@ import type { DispatchStatus, WorkerDispatchState } from '../orchestration-recor
 import type { TerminalExitCause } from '../../../../../shared/terminal/pty/lifecycle/terminal-exit-cause'
 import type { OrchestrationDb, OrchestrationDbConnection } from '../orchestration-db'
 import { ATTEMPT_OBSERVATION_FACT_COLUMN_LIST } from '../row-column-lists'
+import { confirmedOwnerStopSql } from '../worker-dock-eligibility'
 
 export type WorkerAttentionFacts = {
   outcome: AttemptProjectedOutcome
@@ -20,6 +21,8 @@ export type WorkerAttentionFacts = {
   workerState: WorkerDispatchState | null
   workerStage: string | null
   dispatchStatus: DispatchStatus
+  /** A stop someone asked for proved the worker ended, so the stop is no failure. */
+  stopConfirmed: boolean
   /** Execution host of the worker's terminal resource; a remote row with no connection id is
    *  unverifiable. `undefined` when no resource was ever materialized. */
   hostScope?: string | null
@@ -42,6 +45,7 @@ type WorkerAttentionRow = {
   pending_approval: number
   pending_guidance: number
   active_sibling: number
+  stop_confirmed: number
 }
 
 export type WorkerAttentionInput = {
@@ -78,11 +82,13 @@ export function readWorkerAttentionInputs(
                  WHERE m.run_id = d.run_id AND m.to_handle = 'dispatch:' || d.id
                    AND m.read = 0 AND m.delivery_contract = 'current_delivery'
               ) AS pending_guidance,
-              EXISTS (${activeSiblingAttemptSql('d.task_id', 'd.id')}) AS active_sibling
+              EXISTS (${activeSiblingAttemptSql('d.task_id', 'd.id')}) AS active_sibling,
+              ${confirmedOwnerStopSql('dock')} AS stop_confirmed
          FROM dispatch_contexts d
          LEFT JOIN worker_dispatches w ON w.dispatch_id = d.id
          LEFT JOIN tasks t ON t.id = d.task_id AND t.run_id = d.run_id
          LEFT JOIN worker_terminal_resources r ON r.owner_dispatch_id = d.id
+         LEFT JOIN worker_dock_facts dock ON dock.dispatch_id = d.id
         WHERE d.id IN (SELECT value FROM json_each(?))`
     )
     .all(serializedIds) as WorkerAttentionRow[]
@@ -140,6 +146,7 @@ export function projectWorkerAttentionInput(
     workerState: row.worker_state,
     workerStage: row.worker_stage,
     dispatchStatus: row.dispatch_status,
+    stopConfirmed: row.stop_confirmed === 1,
     ...(row.resource_id === null
       ? {}
       : { hostScope: row.host_scope, releaseState: row.release_state })

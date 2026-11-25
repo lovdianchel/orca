@@ -96,7 +96,12 @@ const DISPATCH_STATUS: Record<StandInWorker['state'], DispatchStatus> = {
 function projection(worker: StandInWorker): OrchestrationFleetWorker {
   const exited = worker.terminal === 'released' || worker.state === 'stopped'
   const dispatch = DISPATCH_STATUS[worker.state]
-  const outcome = resolveFleetWorkerOutcome({ workerState: worker.state, dispatchStatus: dispatch })
+  // The stand-in stops only through worker-stop, which always confirms.
+  const outcome = resolveFleetWorkerOutcome({
+    workerState: worker.state,
+    dispatchStatus: dispatch,
+    stopConfirmed: true
+  })
   const liveness: FleetLiveness = exited
     ? { verdict: 'exited', source: 'resource_release' }
     : worker.state === 'stop_unknown'
